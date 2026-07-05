@@ -35,14 +35,18 @@ func (d *Duration) UnmarshalYAML(value *yaml.Node) error {
 	return nil
 }
 
+// Std converts back to a standard time.Duration.
 func (d Duration) Std() time.Duration { return time.Duration(d) }
 
+// Config is the root of the stallwatch YAML file: alert sinks, signals to
+// watch, and fleet-wide defaults.
 type Config struct {
 	Defaults Defaults `yaml:"defaults"`
 	Alerts   []Sink   `yaml:"alerts"`
 	Signals  []Signal `yaml:"signals"`
 }
 
+// Defaults apply to any signal that doesn't set its own value.
 type Defaults struct {
 	Interval  Duration `yaml:"interval"`
 	Retention Duration `yaml:"retention"`
@@ -71,6 +75,8 @@ type Signal struct {
 	FailAfter int           `yaml:"fail_after"`
 }
 
+// CollectorSpec selects and configures how a signal's value is sampled:
+// type "http_json" uses URL/Path/Headers; type "exec" uses Cmd.
 type CollectorSpec struct {
 	Type    string            `yaml:"type"`
 	URL     string            `yaml:"url"`
@@ -88,6 +94,7 @@ type Expectation struct {
 	Max        *float64 `yaml:"max"`
 }
 
+// Load reads, expands, and validates the config file at path.
 func Load(path string) (*Config, error) {
 	raw, err := os.ReadFile(path)
 	if err != nil {
@@ -96,6 +103,8 @@ func Load(path string) (*Config, error) {
 	return Parse(raw)
 }
 
+// Parse decodes raw YAML into a validated Config with defaults applied.
+// Unknown fields are rejected, and unset ${ENV_VAR} references are errors.
 func Parse(raw []byte) (*Config, error) {
 	// Env expansion walks the parsed node tree rather than the raw bytes so
 	// that only values are expanded — a comment mentioning ${SOME_VAR} must

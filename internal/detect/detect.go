@@ -11,10 +11,11 @@ import (
 	"github.com/Albaraazain/stallwatch/internal/store"
 )
 
+// Status is a signal's evaluated health.
 type Status int
 
 const (
-	Warmup Status = iota
+	Warmup Status = iota // not enough history to judge yet
 	OK
 	Breach
 )
@@ -32,6 +33,7 @@ func (s Status) String() string {
 	}
 }
 
+// Kind distinguishes which rule a breach violated.
 type Kind string
 
 const (
@@ -39,6 +41,8 @@ const (
 	KindBounds Kind = "bounds"
 )
 
+// Result is the outcome of evaluating one signal's expectation, with a
+// human-readable Reason suitable for alert bodies.
 type Result struct {
 	Status Status
 	Kind   Kind // set when Status is Breach

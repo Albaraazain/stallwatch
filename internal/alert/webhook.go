@@ -21,6 +21,7 @@ type Webhook struct {
 	client  *http.Client
 }
 
+// NewWebhook builds a webhook sink from its config spec.
 func NewWebhook(spec config.Sink) *Webhook {
 	return &Webhook{
 		name:    spec.Name,

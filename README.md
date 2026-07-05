@@ -1,5 +1,7 @@
 # stallwatch
 
+[![CI](https://github.com/Albaraazain/stallwatch/actions/workflows/ci.yml/badge.svg)](https://github.com/Albaraazain/stallwatch/actions/workflows/ci.yml)
+
 **Uptime monitors tell you a service is alive. stallwatch tells you it's actually doing work.**
 
 There's a class of production failure that every mainstream monitoring tool misses:
@@ -80,6 +82,25 @@ stallwatch -check                            # validate config
 stallwatch                                   # run
 ```
 
+Deploying to a server? See [docs/production-deployment.md](docs/production-deployment.md)
+for the systemd pattern and real-world signal recipes.
+
+## CLI
+
+```
+stallwatch [flags]
+```
+
+| flag | default | description |
+|---|---|---|
+| `-config` | `stallwatch.yaml` | path to the config file |
+| `-db` | `stallwatch.db` | path to the SQLite sample database |
+| `-check` | | validate the config and exit (use in CI / before restarts) |
+| `-debug` | | log every evaluation, not just alerts |
+| `-version` | | print version and exit |
+
+Logs go to stderr in `slog` text format. SIGINT/SIGTERM shut down gracefully.
+
 ## Configuration reference
 
 ### Signal
@@ -94,6 +115,45 @@ stallwatch                                   # run
 | `alert` | no | route to one named sink (default: all sinks) |
 | `fail_after` | no | consecutive collector failures before alerting (default 3) |
 
+### Defaults
+
+| field | default | description |
+|---|---|---|
+| `defaults.interval` | `60s` | collection interval for signals that don't set their own |
+| `defaults.retention` | `168h` | sample retention; auto-raised if a stall window needs more |
+| `defaults.fail_after` | `3` | consecutive collector failures before alerting |
+
+### Collectors
+
+**`http_json`** — GET a URL, extract a number at a dot path.
+
+```yaml
+collect:
+  type: http_json
+  url: http://localhost:8080/metrics
+  path: queues.0.depth        # keys descend objects; numeric segments index arrays
+  headers: {Authorization: "Bearer ${METRICS_TOKEN}"}
+```
+
+Requires a 2xx response; bodies are capped at 1 MiB. The value at the path may
+be a JSON number, a numeric string (`"3.5"`), or a bool (`true` → 1). An empty
+`path` means the whole body is the number.
+
+**`exec`** — run a command, parse its stdout as a number.
+
+```yaml
+collect:
+  type: exec
+  cmd: ["psql", "-tAc", "SELECT count(*) FROM jobs_done"]
+```
+
+`cmd` is an argv list executed directly — no shell, so no quoting surprises;
+wrap in `["sh", "-c", "..."]` when you want pipes. Stdout is trimmed and must
+parse as a number. On failure the first line of stderr lands in the error.
+Probes run in their own process group and the whole group is killed on
+timeout, so an `ssh` to a hung host can't wedge a collector slot or leak
+processes.
+
 ### Expectations
 
 | rule | meaning |
@@ -101,12 +161,39 @@ stallwatch                                   # run
 | `increase_by: N` + `over: D` | value must grow by ≥ N over any trailing window of D — the stall detector |
 | `min: N` / `max: N` | latest value must stay within bounds — fires immediately, even during warmup |
 
+Detection semantics worth knowing:
+
+- **Warmup**: a stall rule needs a baseline sample at least `over` old before
+  it can fire. Baselines live in SQLite, so warmup survives restarts.
+- **Baseline anchoring**: the delta is measured against the newest sample that
+  is at least `over` old — not the window edge — so jittered sampling can
+  never wedge a rule in permanent warmup.
+- **Counter resets**: a negative delta (deploy, truncation) counts as
+  activity, not a stall.
+- Every collection times out (30s) and runs under a concurrency cap (8).
+
 ### Alert sinks
 
-`type: webhook` POSTs JSON: `{app, severity, title, body, fingerprint}`.
+`type: webhook` POSTs JSON:
+
+```json
+{
+  "app": "stallwatch",
+  "severity": "critical",
+  "title": "queue-progress: stalled",
+  "body": "increased by 0 over 1h0m0s, expected >= 1 (last value 4312)",
+  "fingerprint": "stallwatch:breach:queue-progress"
+}
+```
+
 The fingerprint is stable per signal+condition so receivers can deduplicate.
 Headers support `${ENV_VAR}` expansion — referencing an unset variable is a
-startup error, never a silent empty string.
+startup error, never a silent empty string (and comments are never expanded).
+
+Delivery semantics: alerts fire on **state transitions only** (breach entered,
+breach recovered, collector failing, collector recovered). A delivery refused
+by a sink is parked and retried next tick — newest event wins. Alerts raised
+during shutdown still deliver, bounded by a 10s timeout.
 
 ## Design notes
 
@@ -118,9 +205,6 @@ startup error, never a silent empty string.
   is a startup error instead of a signal that silently never runs.
 - **Pure-Go SQLite** (`modernc.org/sqlite`): keeps `CGO_ENABLED=0`
   cross-compilation honest — one `GOOS=linux make` away from any server.
-- **Alerts don't fail silently either**: a delivery that fails is parked and
-  retried on the next tick (newest event wins), and alerts raised moments
-  before shutdown still deliver (bounded, not abandoned).
 
 ## Development
 

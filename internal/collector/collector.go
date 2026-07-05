@@ -10,10 +10,13 @@ import (
 	"github.com/Albaraazain/stallwatch/internal/config"
 )
 
+// Collector samples one numeric value. Implementations must honor ctx's
+// deadline — a hung probe must not outlive it.
 type Collector interface {
 	Collect(ctx context.Context) (float64, error)
 }
 
+// New builds the collector described by spec.
 func New(spec config.CollectorSpec) (Collector, error) {
 	switch spec.Type {
 	case "http_json":

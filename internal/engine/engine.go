@@ -28,6 +28,7 @@ const (
 	pruneEvery     = time.Hour
 )
 
+// Engine runs the collect → store → evaluate → alert cycle for every signal.
 type Engine struct {
 	cfg        *config.Config
 	store      *store.Store
@@ -49,6 +50,7 @@ type signalState struct {
 	pending *alert.Event
 }
 
+// New builds an Engine, constructing a collector for every signal.
 func New(cfg *config.Config, st *store.Store, sinks []alert.Sink, log *slog.Logger) (*Engine, error) {
 	collectors := make(map[string]collector.Collector, len(cfg.Signals))
 	for _, sig := range cfg.Signals {

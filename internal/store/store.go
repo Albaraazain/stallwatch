@@ -11,15 +11,18 @@ import (
 	_ "modernc.org/sqlite" // pure-Go driver: keeps CGO_ENABLED=0 builds honest
 )
 
+// Store is the sample database. Safe for concurrent use.
 type Store struct {
 	db *sql.DB
 }
 
+// Sample is one observed value of a signal at a point in time.
 type Sample struct {
 	TS    time.Time
 	Value float64
 }
 
+// Open creates or opens the SQLite database at path and ensures the schema.
 func Open(path string) (*Store, error) {
 	db, err := sql.Open("sqlite", path)
 	if err != nil {
@@ -45,6 +48,7 @@ func Open(path string) (*Store, error) {
 	return &Store{db: db}, nil
 }
 
+// Append records one sample for a signal.
 func (s *Store) Append(signal string, ts time.Time, value float64) error {
 	_, err := s.db.Exec(`INSERT INTO samples (signal, ts, value) VALUES (?, ?, ?)`,
 		signal, ts.Unix(), value)
@@ -72,6 +76,7 @@ func (s *Store) Window(signal string, from time.Time) ([]Sample, error) {
 	return out, rows.Err()
 }
 
+// Prune deletes all samples older than before, across every signal.
 func (s *Store) Prune(before time.Time) error {
 	_, err := s.db.Exec(`DELETE FROM samples WHERE ts < ?`, before.Unix())
 	return err
