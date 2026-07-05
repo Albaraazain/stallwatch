@@ -1,0 +1,6 @@
+/stallwatch
+/stallwatch-linux-amd64
+*.db
+*.db-wal
+*.db-shm
+stallwatch.yaml

@@ -1,0 +1,43 @@
+# stallwatch watches that work is actually happening — not just that
+# services are up. Values support ${ENV_VAR} expansion; referencing an
+# unset variable fails at startup instead of silently becoming "".
+
+defaults:
+  interval: 60s    # default collection interval per signal
+  retention: 168h  # sample retention (auto-raised to cover stall windows)
+  fail_after: 3    # consecutive collector failures before an alert
+
+alerts:
+  - name: ops
+    type: webhook
+    url: http://notifier:4000/notify
+    headers:
+      X-Internal-Token: ${NOTIFIER_TOKEN}
+
+signals:
+  # A pipeline that must keep making progress: alert when its processed
+  # counter stops growing for an hour. `exec` covers ssh / docker exec /
+  # psql / redis-cli — anything that prints a number.
+  - name: mcq-generation-progress
+    collect:
+      type: exec
+      cmd: ["ssh", "root@prod", "docker", "exec", "studyplatform-db",
+            "psql", "-U", "study", "-tAc",
+            "SELECT count(*) FROM generated_questions"]
+    interval: 5m
+    expect:
+      increase_by: 1
+      over: 1h
+    severity: critical
+    alert: ops
+
+  # A queue that must not back up: alert when depth exceeds a bound.
+  - name: job-queue-depth
+    collect:
+      type: http_json
+      url: http://localhost:8080/metrics/queue
+      path: pending.count   # dot path; numeric segments index arrays
+    interval: 30s
+    expect:
+      max: 500
+    severity: warn
