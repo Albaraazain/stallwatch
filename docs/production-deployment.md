@@ -58,7 +58,44 @@ systemctl enable --now stallwatch
 journalctl -u stallwatch -f
 ```
 
-## 4. Prove the alert chain before trusting it
+## 4. Who watches the watcher
+
+stallwatch can't alert about its own death. Close the loop with a systemd
+`OnFailure=` hook that posts to your alert receiver when the service enters
+failed state.
+
+There's a trap here: with `Restart=always` and `RestartSec=5`, a crash-looping
+service **never trips systemd's default start-rate limit** (5 starts in 10s),
+so it never reaches failed state and `OnFailure=` never fires — it just loops
+silently forever. Widen the window so crash-loops actually trip it:
+
+`/etc/systemd/system/stallwatch.service.d/watchdog.conf`:
+
+```ini
+[Unit]
+OnFailure=stallwatch-notify-failure.service
+StartLimitIntervalSec=300
+StartLimitBurst=5
+```
+
+`/etc/systemd/system/stallwatch-notify-failure.service`:
+
+```ini
+[Unit]
+Description=Alert notifier when stallwatch dies
+
+[Service]
+Type=oneshot
+EnvironmentFile=/opt/notifier/.env
+ExecStart=/usr/bin/curl -fsS -X POST http://127.0.0.1:4000/notify -H "Content-Type: application/json" -H "X-Internal-Token: ${INTERNAL_TOKEN}" -d '{"app":"stallwatch","severity":"critical","title":"stallwatch service died","body":"systemd gave up restarting stallwatch (failed state). No progress monitoring until this is fixed.","fingerprint":"stallwatch:service-died"}'
+```
+
+Trade-off, stated plainly: after 5 failures in 5 minutes the service stays
+down until a human intervenes — but you *know*, which beats an invisible
+crash loop. Test the hook once with `systemctl start
+stallwatch-notify-failure` (use a harmless payload first) before trusting it.
+
+## 5. Prove the alert chain before trusting it
 
 Add a temporary signal that breaches immediately, watch it arrive at your
 alert receiver, then remove it and restart. A monitor whose delivery path was
